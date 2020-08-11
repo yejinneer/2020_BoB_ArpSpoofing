@@ -48,7 +48,6 @@ Mac MyMacAddress(struct ifreq ifr, char *dev){
     Mac my_mac_add = Mac(mac_temp);
     printf("Success! Get My Mac Address! \n");
     return my_mac_add;
-    // Mac(mac_temp); 라고 하면 오류가 나는데  왜??
 }
 
 Ip MyIpAddress(struct ifreq ifr, char * dev){
